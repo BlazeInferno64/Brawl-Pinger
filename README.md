@@ -1,5 +1,17 @@
 # Brawl-Pinger
-An useful tool for pinging Brawl Stars Servers (Supercell) and determining latency
+A useful tool for pinging Brawl Stars Servers (Supercell) and determining latency
+
+# Live Preview
+
+View it live here:
+
+<a href="https://brawl-pinger.netlify.app/">
+
+```
+https://brawl-pinger.netlify.app/
+```
+
+</a>
 
 # LICENSE
 
