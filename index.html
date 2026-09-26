@@ -567,6 +567,24 @@
       text-align: right;
     }
 
+    .loc-val {
+      font-size: .88rem;
+      font-weight: 500;
+      color: var(--md-on-surface-variant);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: right;
+    }
+
+    .loc-isp-container {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      min-width: 0;
+    }
+
     .ping-icon-green {
       filter: drop-shadow(0 0 4px rgba(0, 255, 102, 0.6));
     }
@@ -706,8 +724,11 @@
         font-size: .84rem;
       }
 
-      .latency {
+      .latency, .loc-val {
         font-size: .8rem;
+      }
+
+      .latency {
         min-width: 64px;
       }
 
@@ -788,35 +809,38 @@
             <span class="region-strip strip-EMEA"></span>
             <span class="md-row__name">IP address</span>
           </div>
-          <span class="latency" id="locIp">Detecting…</span>
+          <span class="loc-val" id="locIp">Detecting…</span>
         </div>
         <div class="md-row">
           <div class="md-row__server">
             <span class="region-strip strip-SEA"></span>
             <span class="md-row__name">ISP</span>
           </div>
-          <span class="latency" id="locIsp">&nbsp;</span>
+          <div class="loc-isp-container">
+            <span class="loc-val" id="locIsp">&nbsp;</span>
+            <span class="latency" id="locIspLatency">&nbsp;</span>
+          </div>
         </div>
         <div class="md-row">
           <div class="md-row__server">
             <span class="region-strip strip-NA"></span>
             <span class="md-row__name">City / state</span>
           </div>
-          <span class="latency" id="locCity">&nbsp;</span>
+          <span class="loc-val" id="locCity">&nbsp;</span>
         </div>
         <div class="md-row">
           <div class="md-row__server">
             <span class="region-strip strip-SAS"></span>
             <span class="md-row__name">Country</span>
           </div>
-          <span class="latency" id="locCountry">&nbsp;</span>
+          <span class="loc-val" id="locCountry">&nbsp;</span>
         </div>
         <div class="md-row">
           <div class="md-row__server">
             <span class="region-strip strip-CNML"></span>
             <span class="md-row__name">Timezone</span>
           </div>
-          <span class="latency" id="locTimezone">&nbsp;</span>
+          <span class="loc-val" id="locTimezone">&nbsp;</span>
         </div>
       </div>
     </div>
@@ -1015,7 +1039,7 @@
     </div>
 
     <div class="footer-actions">
-      <a class="md-chip" href="" target="_blank" rel="noopener noreferrer">
+      <a class="md-chip" href="#" rel="noopener noreferrer">
         <img class="md-chip__icon" src="brawl-pinger-icon.png" alt="App Icon" />
         Brawl Pinger
       </a>
@@ -1101,6 +1125,51 @@
 
     document.addEventListener('touchstart', function () { }, { passive: true });
 
+    function currentTimeMillis() {
+      return (new Date()).getTime();
+    }
+
+    function elapsedMillisToIcon(elapsed) {
+      if (elapsed < 50) {
+        return ' <span class="ping-icon-green">🟢</span>';
+      } else if (elapsed < 125) {
+        return ' <span class="ping-icon-yellow">🟡</span>';
+      } else if (elapsed < 200) {
+        return ' <span class="ping-icon-orange">🟠</span>';
+      } else {
+        return ' <span class="ping-icon-red">🔴</span>';
+      }
+    }
+
+    // Ping nearest domestic edge (measures genuine ISP routing latency)
+    async function pingIspGateway() {
+      const ispLatEl = document.getElementById('locIspLatency');
+      if (!ispLatEl) return;
+      ispLatEl.innerHTML = 'pinging';
+      try {
+        let lowestElapsed = 9999;
+        const edgeUrl = 'https://1.1.1.1/cdn-cgi/trace';
+
+        // Warm up connection to eliminate TLS/DNS setup overhead
+        await fetch(edgeUrl, { cache: 'no-store', mode: 'no-cors' });
+
+        for (let i = 0; i < 3; i++) {
+          const startTime = currentTimeMillis();
+          await fetch(edgeUrl, {
+            cache: 'no-store',
+            credentials: 'omit',
+            mode: 'no-cors'
+          });
+          const elapsed = currentTimeMillis() - startTime;
+          if (elapsed < lowestElapsed) lowestElapsed = elapsed;
+        }
+        ispLatEl.innerHTML = lowestElapsed + ' ms ' + elapsedMillisToIcon(lowestElapsed);
+      } catch (err) {
+        console.error(err);
+        ispLatEl.textContent = 'Error ❌';
+      }
+    }
+
     // Approximate "Your location" via the ipquery.io IP API
     async function loadYourLocation() {
       const ipEl = document.getElementById('locIp');
@@ -1110,12 +1179,10 @@
       const tzEl = document.getElementById('locTimezone');
 
       try {
-        // Step 1: api.ipquery.io alone returns just the plain-text IP address
         const ipResponse = await fetch('https://api.ipquery.io', { cache: 'no-store' });
         if (!ipResponse.ok) throw new Error('IP lookup failed with status ' + ipResponse.status);
         const ip = (await ipResponse.text()).trim();
 
-        // Step 2: querying /{ip} returns the full ISP/location/risk payload
         const response = await fetch('https://api.ipquery.io/' + encodeURIComponent(ip), { cache: 'no-store' });
         if (!response.ok) throw new Error('Details lookup failed with status ' + response.status);
         const data = await response.json();
@@ -1134,6 +1201,9 @@
           : 'Unknown';
 
         tzEl.textContent = data.location?.timezone || 'Unknown';
+
+        // Measure true domestic network latency for the ISP
+        pingIspGateway();
       } catch (e) {
         console.error(e);
         [ipEl, ispEl, cityEl, countryEl, tzEl].forEach(el => {
@@ -1143,10 +1213,6 @@
     }
 
     loadYourLocation();
-
-    function currentTimeMillis() {
-      return (new Date()).getTime();
-    }
 
     async function fetchUrl(url, supportsCors, abortController) {
       const OPTS = {
@@ -1161,18 +1227,6 @@
         await fetch(url, OPTS);
       } catch (e) {
         if (e.name === 'AbortError') throw e;
-      }
-    }
-
-    function elapsedMillisToIcon(elapsed) {
-      if (elapsed < 50) {
-        return ' <span class="ping-icon-green">🟢</span>';
-      } else if (elapsed < 125) {
-        return ' <span class="ping-icon-yellow">🟡</span>';
-      } else if (elapsed < 200) {
-        return ' <span class="ping-icon-orange">🟠</span>';
-      } else {
-        return ' <span class="ping-icon-red">🔴</span>';
       }
     }
 
@@ -1229,7 +1283,12 @@
     const pingButton = document.getElementById('pingButton');
     pingButton.addEventListener('click', async function () {
       pingButton.setAttribute('disabled', 'disabled');
-      let latencyBoxes = Array.from(document.querySelectorAll('.latency'));
+
+      // Re-ping ISP network latency on button click
+      pingIspGateway();
+
+      // Only target server latency slots with a pingUrl attribute
+      let latencyBoxes = Array.from(document.querySelectorAll('.latency[pingUrl]'));
       latencyBoxes.reverse();
       await Promise.all([
         worker(latencyBoxes),
